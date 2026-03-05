@@ -61,11 +61,7 @@ PROVIDER_OPTIONS = {
 # 사이드바 렌더링
 # ──────────────────────────────────────────────────────────────
 def render_sidebar() -> str:
-    """좌측 사이드바에 모델 선택, 프로필, 검색 현황, 추천 매물 정보를 표시합니다.
-
-    Returns:
-        선택된 llm_provider 키 ("azure" 또는 "gemini")
-    """
+    """좌측 사이드바에 모델 선택, 프로필, 검색 현황, 추천 매물 정보를 표시합니다."""
     with st.sidebar:
         st.header("⚙️ 모델 설정")
         selected_label = st.selectbox(
@@ -119,10 +115,10 @@ def render_sidebar() -> str:
 
         st.divider()
 
-        # ── 추천 매물 정보 ──
+        # ── 추천 매물 (1위) ──
         prop = state.get("target_property", {})
         if prop and "error" not in prop:
-            st.subheader("🏠 추천 매물")
+            st.subheader("🏠 분석 대상 매물 (1위)")
             st.write(f"**{prop.get('name', 'N/A')}**")
             st.write(f"📍 {prop.get('area', 'N/A')}")
             st.metric("매매가", f"{prop.get('price', 0):,}만원")
@@ -134,6 +130,15 @@ def render_sidebar() -> str:
             if prop.get("floor"):
                 st.write(f"층수: {prop.get('floor')}")
             st.caption(prop.get("description", ""))
+
+        # ── 매물 후보 리스트 ──
+        candidates = state.get("property_candidates", [])
+        if candidates:
+            st.divider()
+            st.subheader(f"📋 매물 후보 ({len(candidates)}건)")
+            for i, c in enumerate(candidates[:5], 1):
+                price_str = f"{c.get('price', 0):,}만원"
+                st.caption(f"{i}. {c.get('name', '')} — {price_str}")
 
     return provider
 
@@ -160,7 +165,6 @@ placeholder_text = (
 )
 
 if user_input := st.chat_input(placeholder_text):
-    # 사용자 메시지 기록 및 표시
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -171,6 +175,7 @@ if user_input := st.chat_input(placeholder_text):
             "user_query": user_input,
             "user_profile": {},
             "target_property": {},
+            "property_candidates": [],
             "financial_report": "",
             "feedback": "",
             "is_valid": False,
@@ -205,13 +210,18 @@ if user_input := st.chat_input(placeholder_text):
 
                         elif node_name == "property_matcher":
                             tp = node_output.get("target_property", {})
+                            cands = node_output.get("property_candidates", [])
                             count = node_output.get("search_count", 0)
                             if tp and "error" not in tp:
                                 st.caption(
-                                    f"  → [{count}회차] "
+                                    f"  → [{count}회차] 1위: "
                                     f"{tp.get('name','')} | "
                                     f"{tp.get('area','')} | "
                                     f"{tp.get('price',0):,}만원"
+                                )
+                            if cands:
+                                st.caption(
+                                    f"  → 총 {len(cands)}건 매물 후보 확보"
                                 )
 
                         elif node_name == "finance_expert":

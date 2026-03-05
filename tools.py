@@ -4,16 +4,17 @@ tools.py - HomeFit 프로젝트의 Tool 정의 모듈
 매물 검색 더미 데이터, 취득세 계산, 대출 한도 계산 함수를
 LangChain @tool 데코레이터로 등록합니다.
 Property Matcher Agent와 Finance Expert Agent가 Function Calling으로 호출합니다.
+
+2026년 최신 규제 반영:
+  - 스트레스 DSR 3단계 (스트레스 금리 1.5% 100% 반영)
+  - LTV: 수도권/규제지역 다주택자 0%, 주담대 최대 6억 한도, 생애 최초 70%
+  - 취득세 감면: 생애 최초 200만원, 출산/양육 가구 500만원
 """
 
 import json
 from langchain_core.tools import tool
 
 
-# ──────────────────────────────────────────────────────────────
-# 더미 매물 데이터 (가격: 만원 단위)
-# 다양한 가격대와 지역을 커버하여 피드백 루프 테스트가 가능하도록 구성
-# ──────────────────────────────────────────────────────────────
 DUMMY_PROPERTIES = [
     {
         "id": "P001",
@@ -173,9 +174,20 @@ DUMMY_PROPERTIES = [
     },
 ]
 
+REGULATED_AREAS = {"강남", "서초", "송파", "용산"}
+METRO_AREAS = {"서울", "경기", "인천"}
+
+
+def _is_metro(area: str) -> bool:
+    return any(m in area for m in METRO_AREAS)
+
+
+def _is_regulated(area: str) -> bool:
+    return any(r in area for r in REGULATED_AREAS)
+
 
 # ──────────────────────────────────────────────────────────────
-# Tool 1: 매물 검색
+# Tool 1: 매물 검색 — 예산 범위 내 매물을 가격 내림차순 리스트로 반환
 # ──────────────────────────────────────────────────────────────
 @tool
 def search_properties(
@@ -191,7 +203,7 @@ def search_properties(
         property_type: 매물 유형 (기본: "아파트")
 
     Returns:
-        조건에 맞는 매물 목록 JSON (최대 5건, 가격 내림차순)
+        조건에 맞는 매물 목록 JSON (가격 내림차순, 전체 반환)
     """
     results = [p for p in DUMMY_PROPERTIES if p["price"] <= max_price]
 
@@ -214,7 +226,9 @@ def search_properties(
     area_results.sort(key=lambda x: x["price"], reverse=True)
     other_results.sort(key=lambda x: x["price"], reverse=True)
 
-    if not area_results and not other_results:
+    combined = area_results + other_results
+
+    if not combined:
         available = [p for p in DUMMY_PROPERTIES if p["price"] <= max_price * 1.3]
         if available:
             available.sort(key=lambda x: x["price"])
@@ -235,31 +249,34 @@ def search_properties(
             ensure_ascii=False,
         )
 
-    if area_results:
-        return json.dumps(area_results[:5], ensure_ascii=False, indent=2)
-
-    return json.dumps(other_results[:5], ensure_ascii=False, indent=2)
+    return json.dumps(combined, ensure_ascii=False, indent=2)
 
 
 # ──────────────────────────────────────────────────────────────
 # Tool 2: 취득세 계산
+# 2026년 개정: 생애 최초 200만원 한도 감면(2028년까지),
+#              출산/양육 가구 최대 500만원 감면
 # ──────────────────────────────────────────────────────────────
 @tool
 def calculate_acquisition_tax(
     property_price: int,
     is_first_home: bool = True,
+    is_parenting_household: bool = False,
 ) -> str:
-    """매물 가격과 생애 첫 주택 여부에 따른 취득세를 계산합니다.
+    """매물 가격과 구매자 조건에 따른 취득세를 계산합니다.
 
-    한국 주택 취득세 기준:
+    2026년 기준 한국 주택 취득세:
       - 6억 이하: 1%
       - 6억 초과~9억 이하: 1%~3% 점진 적용
       - 9억 초과: 3%
-    생애 첫 주택 감면: 최대 200만원
+    감면:
+      - 생애 최초 주택 구매: 최대 200만원 감면 (2028년까지 연장)
+      - 출산/양육 가구: 최대 500만원 감면
 
     Args:
         property_price: 매물 가격 (만원 단위)
         is_first_home: 생애 첫 주택 구매 여부
+        is_parenting_household: 출산/양육 가구 여부
 
     Returns:
         취득세 계산 결과 JSON
@@ -267,7 +284,6 @@ def calculate_acquisition_tax(
     if property_price <= 60000:
         tax_rate = 0.01
     elif property_price <= 90000:
-        # 6억~9억 구간: 1%에서 3%로 점진 증가
         tax_rate = 0.01 + (property_price - 60000) / 30000 * 0.02
     else:
         tax_rate = 0.03
@@ -275,105 +291,194 @@ def calculate_acquisition_tax(
     tax_amount = int(property_price * tax_rate)
 
     discount = 0
+    discount_desc_parts = []
     if is_first_home and property_price <= 120000:
-        discount = min(tax_amount, 200)
-        tax_amount -= discount
+        first_home_discount = min(tax_amount, 200)
+        discount += first_home_discount
+        discount_desc_parts.append(f"생애 최초 감면 {first_home_discount:,}만원")
+
+    if is_parenting_household and property_price <= 120000:
+        parenting_discount = min(tax_amount - discount, 500)
+        parenting_discount = max(parenting_discount, 0)
+        discount += parenting_discount
+        if parenting_discount > 0:
+            discount_desc_parts.append(f"출산/양육 가구 감면 {parenting_discount:,}만원")
+
+    tax_amount -= discount
+    tax_amount = max(tax_amount, 0)
+
+    discount_desc = ", ".join(discount_desc_parts) if discount_desc_parts else "없음"
 
     result = {
         "property_price_만원": property_price,
         "tax_rate_percent": round(tax_rate * 100, 2),
         "tax_before_discount_만원": tax_amount + discount,
-        "first_home_discount_만원": discount,
+        "discount_만원": discount,
+        "discount_detail": discount_desc,
         "final_tax_만원": tax_amount,
         "description": (
             f"매물가 {property_price:,}만원 기준 취득세율 {tax_rate*100:.1f}%, "
             f"취득세 {tax_amount:,}만원"
-            + (f" (생애 첫 주택 감면 {discount:,}만원 적용)" if discount > 0 else "")
+            + (f" (감면 적용: {discount_desc})" if discount > 0 else "")
         ),
     }
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 # ──────────────────────────────────────────────────────────────
-# Tool 3: 대출 한도 계산 (LTV + DSR)
+# Tool 3: 대출 한도 계산 (LTV + 스트레스 DSR 3단계)
+#
+# 2026년 규제:
+#   - 스트레스 DSR 3단계: 기본금리 + 스트레스 금리 1.5%를 100% 반영
+#   - LTV: 수도권/규제지역 다주택자 0%, 주담대 최대 한도 6억
+#          생애 최초 구입자 수도권 LTV 70%
+#   - 계산 기준: '필요 대출금'(=총 필요 자금 - 보유 자금) 기준
 # ──────────────────────────────────────────────────────────────
 @tool
 def calculate_loan_limit(
     property_price: int,
     annual_income: int,
+    user_budget: int = 0,
+    acquisition_tax: int = 0,
     existing_debt_payment: int = 0,
+    is_first_home: bool = True,
+    area: str = "서울",
 ) -> str:
-    """LTV(70%) 및 DSR(40%) 규제를 적용하여 대출 가능 한도를 계산합니다.
+    """보유 자금을 우선 사용하고, 부족분만 대출받는 방식으로 대출 한도를 계산합니다.
 
-    대출 조건 가정: 30년 만기, 연 4% 고정금리, 원리금 균등상환
+    계산 절차:
+      1) 총 필요 자금 = 매물 가격 + 취득세
+      2) 필요 대출금 = 총 필요 자금 - 보유 자금
+      3) 대출 불필요(필요 대출금 ≤ 0) → 대출 없이 구매 가능
+      4) LTV/DSR 최대 대출 한도 산출
+      5) 필요 대출금 ≤ 최대 한도 → 구매 가능
+      6) 월 상환액은 '필요 대출금' 기준으로 계산
 
     Args:
         property_price: 매물 가격 (만원 단위)
         annual_income: 연간 소득 (만원 단위)
+        user_budget: 사용자 보유 자금 (만원 단위)
+        acquisition_tax: 취득세 (만원 단위)
         existing_debt_payment: 기존 연간 대출 상환액 (만원 단위, 기본 0)
+        is_first_home: 생애 첫 주택 구매 여부
+        area: 매물 지역 (예: "서울 강남구")
 
     Returns:
-        대출 한도 계산 결과 JSON (LTV/DSR 각각의 한도 및 최종 한도 포함)
+        대출 한도 계산 결과 JSON
     """
-    # === LTV 기반 한도 (비규제지역 70%) ===
-    ltv_ratio = 0.70
+    total_required = property_price + acquisition_tax
+    needed_loan = total_required - user_budget
+
+    if needed_loan <= 0:
+        return json.dumps({
+            "total_required_만원": total_required,
+            "user_budget_만원": user_budget,
+            "needed_loan_만원": 0,
+            "loan_needed": False,
+            "max_loan_limit_만원": 0,
+            "monthly_repayment_만원": 0,
+            "can_purchase": True,
+            "remaining_funds_만원": abs(needed_loan),
+            "description": (
+                f"총 필요 자금 {total_required:,}만원 (매물가 {property_price:,} + 취득세 {acquisition_tax:,}) ≤ "
+                f"보유 자금 {user_budget:,}만원. 대출 없이 구매 가능합니다. "
+                f"잔여 자금: {abs(needed_loan):,}만원"
+            ),
+        }, ensure_ascii=False, indent=2)
+
+    # === LTV 산출 ===
+    is_metro = _is_metro(area)
+    is_regulated = _is_regulated(area)
+
+    if is_first_home:
+        ltv_ratio = 0.70
+        ltv_label = "생애최초 70%"
+    elif is_regulated:
+        ltv_ratio = 0.0
+        ltv_label = "규제지역 다주택 0%"
+    elif is_metro:
+        ltv_ratio = 0.50
+        ltv_label = "수도권 50%"
+    else:
+        ltv_ratio = 0.70
+        ltv_label = "비규제 70%"
+
     ltv_limit = int(property_price * ltv_ratio)
 
-    # === DSR 기반 한도 (40%, 30년 고정 4%) ===
-    annual_rate = 0.04
-    monthly_rate = annual_rate / 12
-    n_months = 360  # 30년
+    if is_metro and ltv_limit > 60000:
+        ltv_limit = 60000
+        ltv_label += " (수도권 주담대 최대 6억 한도 적용)"
 
-    max_annual_repayment = int(annual_income * 0.40) - existing_debt_payment
+    # === 스트레스 DSR 3단계 ===
+    base_rate = 0.04
+    stress_rate = 0.015
+    applied_rate = base_rate + stress_rate  # 5.5%
+    monthly_rate = applied_rate / 12
+    n_months = 360
+
+    dsr_ratio = 0.40
+    max_annual_repayment = int(annual_income * dsr_ratio) - existing_debt_payment
 
     if max_annual_repayment <= 0:
         dsr_limit = 0
-        monthly_repayment = 0
     else:
         max_monthly_payment = max_annual_repayment / 12
-        # 대출 원금 역산: P = PMT × [(1+r)^n − 1] / [r × (1+r)^n]
         annuity_factor = (
             ((1 + monthly_rate) ** n_months - 1)
             / (monthly_rate * (1 + monthly_rate) ** n_months)
         )
         dsr_limit = int(max_monthly_payment * annuity_factor)
-        monthly_repayment = max_monthly_payment
 
-    final_limit = min(ltv_limit, dsr_limit)
+    max_loan_limit = min(ltv_limit, dsr_limit)
     limiting_factor = "LTV" if ltv_limit <= dsr_limit else "DSR"
-    required_equity = property_price - final_limit
 
-    # 최종 대출 한도 기준 실제 월 상환액 재계산
-    if final_limit > 0:
+    can_purchase = needed_loan <= max_loan_limit
+
+    # 월 상환액: '필요 대출금' 기준 (최대 한도가 아닌 실제 빌려야 하는 금액)
+    actual_loan = needed_loan if can_purchase else max_loan_limit
+    if actual_loan > 0:
+        repay_rate = base_rate / 12  # 실제 상환은 기본금리 기준
         actual_monthly = int(
-            final_limit
-            * monthly_rate
-            * (1 + monthly_rate) ** n_months
-            / ((1 + monthly_rate) ** n_months - 1)
+            actual_loan
+            * repay_rate
+            * (1 + repay_rate) ** n_months
+            / ((1 + repay_rate) ** n_months - 1)
         )
     else:
         actual_monthly = 0
 
+    shortfall = max(needed_loan - max_loan_limit, 0)
+
     result = {
-        "property_price_만원": property_price,
-        "ltv_ratio": f"{ltv_ratio * 100:.0f}%",
+        "total_required_만원": total_required,
+        "user_budget_만원": user_budget,
+        "needed_loan_만원": needed_loan,
+        "loan_needed": True,
+        "ltv_ratio": ltv_label,
         "ltv_limit_만원": ltv_limit,
-        "dsr_ratio": "40%",
+        "dsr_ratio": f"{dsr_ratio*100:.0f}% (스트레스 DSR 3단계, 금리 {applied_rate*100:.1f}%)",
         "dsr_limit_만원": dsr_limit,
-        "annual_income_만원": annual_income,
-        "existing_debt_payment_만원": existing_debt_payment,
-        "final_loan_limit_만원": final_limit,
+        "max_loan_limit_만원": max_loan_limit,
         "limiting_factor": limiting_factor,
-        "required_equity_만원": required_equity,
+        "can_purchase": can_purchase,
+        "actual_loan_만원": actual_loan,
         "monthly_repayment_만원": actual_monthly,
         "loan_term": "30년",
-        "interest_rate": "연 4.0%",
+        "interest_rate": f"연 {base_rate*100:.1f}% (스트레스 DSR 산정금리: {applied_rate*100:.1f}%)",
+        "shortfall_만원": shortfall,
         "description": (
-            f"LTV({ltv_ratio*100:.0f}%) 한도: {ltv_limit:,}만원, "
-            f"DSR(40%) 한도: {dsr_limit:,}만원 → "
-            f"최종 대출 한도: {final_limit:,}만원 ({limiting_factor} 제한), "
-            f"필요 자기자본: {required_equity:,}만원, "
-            f"월 상환액: {actual_monthly:,}만원"
+            f"총 필요 자금: {total_required:,}만원 | 보유 자금: {user_budget:,}만원 | "
+            f"필요 대출금: {needed_loan:,}만원\n"
+            f"LTV({ltv_label}) 한도: {ltv_limit:,}만원, "
+            f"DSR(40%, 스트레스 금리 {applied_rate*100:.1f}%) 한도: {dsr_limit:,}만원 → "
+            f"최대 대출 한도: {max_loan_limit:,}만원 ({limiting_factor} 제한)\n"
+            + (
+                f"필요 대출금 {needed_loan:,}만원 ≤ 최대 한도 {max_loan_limit:,}만원 → ✅ 구매 가능, "
+                f"월 상환액: {actual_monthly:,}만원"
+                if can_purchase
+                else f"필요 대출금 {needed_loan:,}만원 > 최대 한도 {max_loan_limit:,}만원 → ❌ 구매 불가, "
+                f"부족분: {shortfall:,}만원"
+            )
         ),
     }
     return json.dumps(result, ensure_ascii=False, indent=2)
