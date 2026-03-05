@@ -199,11 +199,12 @@ def search_properties(
 
     Args:
         max_price: 최대 매물 가격 (만원 단위, 예: 70000 = 7억)
-        preferred_area: 선호 지역 키워드 (예: "서울", "강남", "경기")
+        preferred_area: 선호 지역 키워드 (예: "서울", "강남", "경기").
+                        지정 시 해당 지역 매물만 엄격하게 필터링하여 반환합니다.
         property_type: 매물 유형 (기본: "아파트")
 
     Returns:
-        조건에 맞는 매물 목록 JSON (가격 내림차순, 전체 반환)
+        조건에 맞는 매물 목록 JSON (가격 내림차순, 선호 지역 매물만 반환)
     """
     results = [p for p in DUMMY_PROPERTIES if p["price"] <= max_price]
 
@@ -212,23 +213,47 @@ def search_properties(
         if type_filtered:
             results = type_filtered
 
-    area_results = []
-    other_results = []
     if preferred_area:
-        for p in results:
-            if preferred_area in p["area"]:
-                area_results.append(p)
-            else:
-                other_results.append(p)
+        combined = [p for p in results if preferred_area in p["area"]]
     else:
-        area_results = results
+        combined = list(results)
 
-    area_results.sort(key=lambda x: x["price"], reverse=True)
-    other_results.sort(key=lambda x: x["price"], reverse=True)
-
-    combined = area_results + other_results
+    combined.sort(key=lambda x: x["price"], reverse=True)
 
     if not combined:
+        if preferred_area:
+            nearby = [p for p in results if preferred_area not in p["area"]]
+            higher_in_area = [
+                p for p in DUMMY_PROPERTIES
+                if p["price"] <= max_price * 1.3 and preferred_area in p["area"]
+            ]
+            hints = []
+            if higher_in_area:
+                higher_in_area.sort(key=lambda x: x["price"])
+                hint_items = [
+                    f"{p['name']}({p['area']}, {p['price']:,}만원)"
+                    for p in higher_in_area[:3]
+                ]
+                hints.append(
+                    f"예산을 높이면 '{preferred_area}' 지역에서 검색 가능: "
+                    + ", ".join(hint_items)
+                )
+            if nearby:
+                nearby.sort(key=lambda x: x["price"], reverse=True)
+                hint_items = [
+                    f"{p['name']}({p['area']}, {p['price']:,}만원)"
+                    for p in nearby[:3]
+                ]
+                hints.append(f"인근 지역 매물 참고: " + ", ".join(hint_items))
+            hint_text = " / ".join(hints) if hints else ""
+            return json.dumps(
+                {
+                    "error": f"'{preferred_area}' 지역에서 {max_price:,}만원 이하 매물이 없습니다. "
+                    + hint_text
+                },
+                ensure_ascii=False,
+            )
+
         available = [p for p in DUMMY_PROPERTIES if p["price"] <= max_price * 1.3]
         if available:
             available.sort(key=lambda x: x["price"])
@@ -239,7 +264,7 @@ def search_properties(
             hint = ", ".join(hint_items)
             return json.dumps(
                 {
-                    "error": f"max_price {max_price:,}만원 이하 '{preferred_area}' 매물이 없습니다. "
+                    "error": f"max_price {max_price:,}만원 이하 매물이 없습니다. "
                     f"max_price를 높이면 다음 매물이 검색 가능합니다: {hint}"
                 },
                 ensure_ascii=False,
@@ -479,6 +504,107 @@ def calculate_loan_limit(
                 else f"필요 대출금 {needed_loan:,}만원 > 최대 한도 {max_loan_limit:,}만원 → ❌ 구매 불가, "
                 f"부족분: {shortfall:,}만원"
             )
+        ),
+    }
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ──────────────────────────────────────────────────────────────
+# Tool 4: 총 필요 자금 & 필요 대출금 계산 (LLM 산수 환각 방지)
+# ──────────────────────────────────────────────────────────────
+@tool
+def calculate_required_funds(
+    property_price: int,
+    acquisition_tax: int,
+    user_budget: int,
+) -> str:
+    """매물 가격·취득세·보유 자금으로 총 필요 자금과 필요 대출금을 정확히 계산합니다.
+
+    LLM이 직접 덧셈/뺄셈하면 오류가 발생할 수 있으므로, 반드시 이 도구를 호출하세요.
+
+    Args:
+        property_price: 매물 가격 (만원 단위)
+        acquisition_tax: 취득세 (만원 단위)
+        user_budget: 사용자 보유 자금 (만원 단위)
+
+    Returns:
+        총 필요 자금, 필요 대출금, 대출 필요 여부 JSON
+    """
+    total_required = property_price + acquisition_tax
+    needed_loan = total_required - user_budget
+    can_buy_without_loan = needed_loan <= 0
+    needed_loan = max(needed_loan, 0)
+
+    result = {
+        "property_price_만원": property_price,
+        "acquisition_tax_만원": acquisition_tax,
+        "total_required_만원": total_required,
+        "user_budget_만원": user_budget,
+        "needed_loan_만원": needed_loan,
+        "can_buy_without_loan": can_buy_without_loan,
+        "description": (
+            f"총 필요 자금: {property_price:,} + {acquisition_tax:,} = {total_required:,}만원 | "
+            f"필요 대출금: {total_required:,} - {user_budget:,} = {needed_loan:,}만원"
+            + (" (대출 불필요)" if can_buy_without_loan else "")
+        ),
+    }
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ──────────────────────────────────────────────────────────────
+# Tool 5: 월 상환액 계산 (원리금균등상환)
+# ──────────────────────────────────────────────────────────────
+@tool
+def calculate_monthly_repayment(
+    loan_amount: int,
+    annual_rate: float = 0.04,
+    loan_years: int = 30,
+) -> str:
+    """대출 원금에 대한 월 상환액을 원리금균등상환 방식으로 정확히 계산합니다.
+
+    LLM이 직접 이자 계산을 하면 오류가 발생할 수 있으므로, 반드시 이 도구를 호출하세요.
+
+    Args:
+        loan_amount: 대출 원금 (만원 단위). 실제 필요 대출금을 입력하세요.
+        annual_rate: 연 이자율 (소수, 기본 0.04 = 4%)
+        loan_years: 상환 기간 (년, 기본 30)
+
+    Returns:
+        월 상환액 계산 결과 JSON
+    """
+    if loan_amount <= 0:
+        return json.dumps(
+            {
+                "loan_amount_만원": 0,
+                "monthly_repayment_만원": 0,
+                "description": "대출 불필요 — 월 상환액 0원",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    monthly_rate = annual_rate / 12
+    n_months = loan_years * 12
+    monthly = int(
+        loan_amount
+        * monthly_rate
+        * (1 + monthly_rate) ** n_months
+        / ((1 + monthly_rate) ** n_months - 1)
+    )
+    total_repayment = monthly * n_months
+    total_interest = total_repayment - loan_amount
+
+    result = {
+        "loan_amount_만원": loan_amount,
+        "annual_rate_percent": round(annual_rate * 100, 2),
+        "loan_years": loan_years,
+        "monthly_repayment_만원": monthly,
+        "total_repayment_만원": total_repayment,
+        "total_interest_만원": total_interest,
+        "description": (
+            f"대출금 {loan_amount:,}만원 | 연 {annual_rate*100:.1f}% | "
+            f"{loan_years}년 상환 → 월 상환액 약 {monthly:,}만원 "
+            f"(총 상환 {total_repayment:,}만원, 이자 {total_interest:,}만원)"
         ),
     }
     return json.dumps(result, ensure_ascii=False, indent=2)
