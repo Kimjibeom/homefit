@@ -106,8 +106,9 @@ def get_embeddings(provider: str = "azure"):
     """
     if provider == "gemini":
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
+        embed_model = os.getenv("GOOGLE_EMBED_MODEL", "gemini-embedding-001")
         return GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
+            model=f"models/{embed_model}",
             google_api_key=os.getenv("GOOGLE_API_KEY"),
         )
     return AzureOpenAIEmbeddings(
