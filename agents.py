@@ -31,6 +31,31 @@ from rag import retrieve_policy_context
 load_dotenv()
 
 
+def _content_to_str(content) -> str:
+    """LLM 응답의 content를 문자열로 변환합니다.
+
+    Gemini 등 일부 프로바이더는 content를 str이 아닌
+    list[dict] 또는 list[Part] 형태로 반환할 수 있습니다.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(item.get("text", str(item)))
+            elif hasattr(item, "text"):
+                parts.append(item.text)
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(content)
+
+
 # ══════════════════════════════════════════════════════════════
 # LangGraph 상태 스키마
 # ══════════════════════════════════════════════════════════════
@@ -271,16 +296,40 @@ def run_property_matcher_agent(state: GraphState) -> dict:
                 )
 
         selected = _extract_property_from_messages(messages)
+
+        if selected.get("error"):
+            selected = _fallback_search(profile, suggested_max)
+
         return {
             "target_property": selected,
             "search_count": search_count + 1,
         }
 
     except Exception as e:
+        selected = _fallback_search(profile, suggested_max)
         return {
-            "target_property": {"error": f"매물 검색 중 오류: {str(e)}"},
+            "target_property": selected,
             "search_count": search_count + 1,
         }
+
+
+def _fallback_search(profile: dict, max_price: int) -> dict:
+    """LLM이 도구를 호출하지 않았거나 매물 추출에 실패했을 때
+    직접 search_properties를 호출하여 최적 매물을 반환합니다."""
+    try:
+        raw = search_properties.invoke({
+            "max_price": max_price,
+            "preferred_area": profile.get("preferred_area", "서울"),
+            "property_type": profile.get("property_type", "아파트"),
+        })
+        parsed = json.loads(raw)
+        if isinstance(parsed, list) and parsed:
+            household = profile.get("household_size", 1)
+            suitable = [p for p in parsed if p.get("rooms", 0) >= household]
+            return suitable[0] if suitable else parsed[0]
+    except Exception:
+        pass
+    return {"error": "조건에 맞는 매물을 찾지 못했습니다."}
 
 
 def _extract_property_from_messages(messages: list) -> dict:
@@ -305,8 +354,8 @@ def _extract_property_from_messages(messages: list) -> dict:
 
     # LLM 최종 응답에서 태그 기반 파싱
     final_msg = messages[-1]
-    if hasattr(final_msg, "content") and isinstance(final_msg.content, str):
-        content = final_msg.content
+    content = _content_to_str(getattr(final_msg, "content", ""))
+    if content:
 
         if "[SELECTED_PROPERTY]" in content and "[/SELECTED_PROPERTY]" in content:
             try:
@@ -438,7 +487,7 @@ def run_finance_expert_agent(state: GraphState) -> dict:
                     ToolMessage(content=result, tool_call_id=tc["id"])
                 )
 
-        final_content = getattr(response, "content", "") or ""
+        final_content = _content_to_str(getattr(response, "content", ""))
 
         # ── 판정 결과 추출 ──
         is_valid = "[VERDICT]PASS[/VERDICT]" in final_content
