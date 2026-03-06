@@ -275,14 +275,13 @@ def run_profile_agent(state: GraphState) -> dict:
 # Agent 2: Property Matcher Agent — 매물 후보 리스트 검색
 # ══════════════════════════════════════════════════════════════
 PROPERTY_SYSTEM_PROMPT = """당신은 부동산 매물 추천 전문가입니다.
-사용자 프로필과 이전 피드백을 분석하여 예산 범위 내 매물을 검색하세요.
+사용자 프로필을 분석하여 예산 범위 내 매물을 검색하세요.
 
 행동 규칙:
 1. 반드시 search_properties 도구를 호출하여 매물을 검색하세요.
-2. 피드백에 '예산 초과'가 포함된 경우, 이전 매물보다 확실히 저렴한 매물을 찾으세요.
-3. max_price는 아래에 제시된 '추천 max_price'를 사용하세요.
-4. 검색 결과 전체를 반환하세요. 이 중에서 시스템이 자동으로 가격이 높은 순서대로 정렬하고 최적의 매물을 선택합니다.
-5. 검색 결과가 있으면, 그 중 가격이 가장 높고 가구원 수에 맞는 매물을 아래 태그에 JSON으로 출력하세요:
+2. max_price는 아래에 제시된 '추천 max_price'를 사용하세요.
+3. 검색 결과 전체를 반환하세요. 이 중에서 시스템이 자동으로 가격이 높은 순서대로 정렬하고 최적의 매물을 선택합니다.
+4. 검색 결과가 있으면, 그 중 가격이 가장 높고 가구원 수에 맞는 매물을 아래 태그에 JSON으로 출력하세요:
    [SELECTED_PROPERTY]
    {"id": "...", "name": "...", ...}
    [/SELECTED_PROPERTY]"""
@@ -329,10 +328,22 @@ def run_property_matcher_agent(state: GraphState) -> dict:
     feedback = state.get("feedback", "")
     search_count = state.get("search_count", 0)
 
-    suggested_max = _estimate_max_affordable_price(profile)
     prev_property = state.get("target_property", {})
-    if feedback and prev_property.get("price"):
-        suggested_max = int(prev_property["price"] * 0.95)
+    prev_candidates = state.get("property_candidates", [])
+
+    # ── 재검색: 기존 후보 중 이전 매물보다 저렴한 것으로 분석 대상 교체 ──
+    if feedback and prev_property.get("price") and prev_candidates:
+        prev_price = prev_property["price"]
+        cheaper = [c for c in prev_candidates if c.get("price", 0) < prev_price]
+        if cheaper:
+            selected = _pick_best_property(cheaper, profile)
+            return {
+                "target_property": selected,
+                "property_candidates": prev_candidates,
+                "search_count": search_count + 1,
+            }
+
+    suggested_max = _estimate_max_affordable_price(profile)
 
     feedback_section = f"\n\n[이전 검색 피드백]\n{feedback}" if feedback else ""
 
