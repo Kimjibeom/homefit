@@ -235,7 +235,7 @@ AOAI_DEPLOY_EMBED_3_SMALL=text-embedding-3-small
 
 # Google Gemini (선택)
 GOOGLE_API_KEY=your-google-api-key
-GOOGLE_MODEL_NAME=gemini-2.5-flash-lite
+GOOGLE_MODEL_NAME=gemini-3.5-flash
 GOOGLE_EMBED_MODEL=gemini-embedding-001
 ```
 
@@ -281,7 +281,7 @@ streamlit run app.py
 | 분류 | 기술 |
 |------|------|
 | **프레임워크** | LangChain, LangGraph |
-| **LLM** | Azure OpenAI (GPT-4o-mini), Google Gemini (2.5 Flash Lite) |
+| **LLM** | Azure OpenAI (GPT-4o-mini), Google Gemini (3.5 Flash) |
 | **임베딩** | Azure `text-embedding-3-small`, Google `gemini-embedding-001` |
 | **벡터 DB** | FAISS (CPU) |
 | **UI** | Streamlit |

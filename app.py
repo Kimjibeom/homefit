@@ -52,8 +52,8 @@ NODE_STATUS_MAP = {
 }
 
 PROVIDER_OPTIONS = {
-    "Gemini (Google)": "gemini",
     "Azure OpenAI": "azure",
+    "Gemini (Google)": "gemini",
 }
 
 
