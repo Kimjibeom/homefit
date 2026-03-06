@@ -455,13 +455,18 @@ def run_finance_expert_agent(state: GraphState) -> dict:
     property_price = prop.get("price", 0)
     preferred_area = profile.get("preferred_area", "서울")
 
-    # ── RAG: 관련 정책 문서 검색 ──
+    # ── RAG: 관련 정책 문서 검색 (buyer_type 메타데이터 필터링 적용) ──
+    is_first_home = profile.get("is_first_home", True)
+    buyer_type = "생애최초" if is_first_home else None
+
     rag_query = (
         f"주택 가격 {property_price}만원 구매 시 "
         f"LTV DSR 스트레스 DSR 취득세 대출 한도 규제 보유 자금 우선 사용"
     )
     try:
-        policy_context = retrieve_policy_context(rag_query, k=4, provider=provider)
+        policy_context = retrieve_policy_context(
+            rag_query, k=4, provider=provider, buyer_type=buyer_type,
+        )
     except Exception:
         policy_context = (
             "정책 정보 검색에 실패했습니다. "
