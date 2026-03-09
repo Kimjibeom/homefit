@@ -25,6 +25,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2007,
+        "score": 85,
         "description": "길음뉴타운 내 위치, 977세대, 대중교통 이용 편리",
     },
     {
@@ -36,6 +37,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2010,
+        "score": 76,
         "description": "길음뉴타운 대단지 (1,012세대), 학군 우수",
     },
     {
@@ -47,6 +49,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2003,
+        "score": 73,
         "description": "길음뉴타운 진입부, 1,125세대 대단지",
     },
     {
@@ -58,7 +61,8 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2010,
-        "description": "1,497세대 매머드급 단지, 쾌적한 주거환경",
+        "score": 70,
+        "description": "1,497세대 대단지, 쾌적한 주거환경",
     },
     {
         "id": "P005",
@@ -69,6 +73,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2014,
+        "score": 69,
         "description": "돈암동 위치, 490세대, 비교적 신축 컨디션",
     },
     {
@@ -80,6 +85,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2003,
+        "score": 66,
         "description": "돈암동 540세대, 가성비 우수",
     },
     {
@@ -91,6 +97,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2019,
+        "score": 80,
         "description": "미아사거리역 역세권, 2,352세대 랜드마크 신축",
     },
     {
@@ -102,6 +109,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2022,
+        "score": 80,
         "description": "미아사거리역 인접, 2,029세대 최신축 프리미엄",
     },
     {
@@ -113,6 +121,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2010,
+        "score": 68,
         "description": "미아사거리 인프라 공유, 376세대 알짜 단지",
     },
     {
@@ -124,6 +133,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2006,
+        "score": 68,
         "description": "480세대, 교통 및 상권 이용 편리",
     },
     {
@@ -135,6 +145,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2004,
+        "score": 60,
         "description": "솔샘역 초역세권, 3,830세대 초대형 단지, 북한산 숲세권",
     },
     {
@@ -146,6 +157,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2011,
+        "score": 62,
         "description": "솔샘역 인접, 1,370세대 대단지",
     },
     {
@@ -157,6 +169,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2009,
+        "score": 67,
         "description": "석관동 580세대, 조용한 주거 환경",
     },
     {
@@ -168,6 +181,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2020,
+        "score": 79,
         "description": "장위뉴타운 내 신축, 1,711세대, 북서울꿈의숲 인접",
     },
     {
@@ -179,6 +193,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2025,
+        "score": 77,
         "description": "장위뉴타운 대장주 예정, 2,840세대 최신축 프리미엄",
     },
     {
@@ -190,6 +205,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2003,
+        "score": 60,
         "description": "장위동 1,253세대, 실속형 대단지",
     },
     {
@@ -201,6 +217,7 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2016,
+        "score": 71,
         "description": "중계동 학원가 접근성 우수, 457세대 신축급",
     },
     {
@@ -212,7 +229,8 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 1998,
-        "description": "돈암동 4,515세대 초대형 매머드급 단지, 넓은 조경",
+        "score": 59,
+        "description": "돈암동 4,515세대 초대형 매머드급 단지",
     },
     {
         "id": "P019",
@@ -223,8 +241,21 @@ DUMMY_PROPERTIES = [
         "size_m2": 59.9,
         "rooms": 3,
         "year_built": 2017,
-        "description": "보문역 역세권, 1,186세대 대단지, 직주근접 우수",
-    }
+        "score": 74,
+        "description": "보문역 역세권, 1,186세대 대단지, 직주근접 우수, 수영장 아파트",
+    },
+    {
+        "id": "P020",
+        "name": "래미안 월곡",
+        "area": "서울 성북구",
+        "type": "아파트",
+        "price": 85000,
+        "size_m2": 59.9,
+        "rooms": 3,
+        "year_built": 2010,
+        "score": 70,
+        "description": "월곡동 위치, 대중교통 접근성 양호",
+    },
 ]
 
 REGULATED_AREAS = {"강남", "서초", "송파", "용산"}
@@ -271,7 +302,7 @@ def search_properties(
     else:
         combined = list(results)
 
-    combined.sort(key=lambda x: x["price"], reverse=True)
+    combined.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     if not combined:
         if preferred_area:
