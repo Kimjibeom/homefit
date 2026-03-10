@@ -28,12 +28,12 @@
 | 기능 | 설명 |
 |------|------|
 | **자연어 프로파일링** | 사용자의 자유 형식 질문에서 예산, 소득, 가구원 수, 선호 지역 등을 자동 추출 |
-| **매물 검색 및 추천** | 예산 범위 내 매물을 Tool Calling으로 검색하고 최적 매물을 선정 |
-| **재무 분석 리포트** | 취득세, 대출 한도(LTV/DSR), 월 상환액을 도구 기반으로 정밀 계산 |
-| **RAG 기반 정책 검증** | FAISS 벡터 DB에서 관련 부동산 정책 문서를 검색하여 근거 기반 분석 |
-| **자동 재탐색 루프** | 구매 불가 판정 시 최대 3회까지 더 저렴한 매물을 자동 재검색 |
+| **실시간 매물 검색** | 네이버 부동산 API로 실시간 매매가를 조회하고, 입지 점수 기준 Top 5 매물을 추천 |
+| **TOP 5 일괄 재무 분석** | 취득세, 대출 한도(LTV/DSR), 월 상환액을 TOP 5 매물 각각에 대해 도구 기반으로 정밀 계산 |
+| **RAG 기반 정책 검증** | FAISS 벡터 DB에서 관련 부동산 정책 문서를 검색하여 근거 기반 분석 (topic 커버리지 + 키워드 리랭킹) |
 | **듀얼 LLM 지원** | Azure OpenAI(GPT-4o-mini)와 Google Gemini 중 선택 가능 |
 | **실시간 진행 표시** | Streamlit 스트리밍으로 각 에이전트의 분석 진행 상황을 실시간 확인 |
+| **환각 방지 설계** | 모든 금액 계산(세금, 대출, 상환액)을 LLM이 아닌 전용 도구가 수행 |
 
 ---
 
@@ -55,11 +55,9 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │               LangGraph StateGraph (graph.py)                   │
 │                                                                 │
-│  START → [Profile Agent] → [Property Matcher] → [Finance Expert]│
-│                                     ▲                │          │
-│                                     │    FAIL & <3회 │          │
-│                                     └────────────────┘          │
-│                                          PASS or ≥3회 → END     │
+│    START → [Profile Agent] → [Property Matcher] → [Finance Expert] → END
+│                                                                 │
+│    단방향 리니어 플로우: 프로파일링 → 매물 검색 → 재무 검증       │
 └─────────────────────────────────────────────────────────────────┘
          │                    │                    │
          ▼                    ▼                    ▼
@@ -67,10 +65,11 @@
    │agents.py │      │  tools.py    │     │   rag.py     │
    │ 에이전트  │      │  Tool 정의   │     │  RAG 모듈    │
    │ LLM 호출  │─────▶│ - 매물 검색  │     │ - 정책 문서  │
-   │ 로직      │      │ - 취득세     │     │ - FAISS DB   │
-   └──────────┘      │ - 대출 한도  │     │ - Retriever  │
-                     │ - 필요 자금  │     └──────────────┘
-                     │ - 월 상환액  │
+   │ 로직      │      │   (실시간)   │     │   (12건)     │
+   └──────────┘      │ - 취득세     │     │ - FAISS DB   │
+                     │ - 대출 한도  │     │ - 캐시 영속화│
+                     │ - 필요 자금  │     │ - 리랭킹     │
+                     │ - 월 상환액  │     └──────────────┘
                      └──────────────┘
 ```
 
@@ -83,34 +82,29 @@
 - **역할**: 자연어 질문에서 구조화된 사용자 프로필 추출
 - **방식**: Pydantic `with_structured_output`을 사용한 Structured Output
 - **추출 항목**: 보유 자금, 연소득, 가구원 수, 선호 지역, 매물 유형, 생애 첫 주택 여부, 기존 대출 상환액
+- **Fallback**: LLM 호출 실패 시 1회 재시도 후 정규식 기반 프로필 추출
 
 ### Agent 2: Property Matcher — 매물 검색/추천
 
-- **역할**: 프로필과 피드백을 반영하여 예산 범위 내 매물 후보 리스트 검색
-- **방식**: Tool Calling으로 `search_properties` 도구 호출
-- **로직**: 보유 자금 + 예상 대출 한도 기반 최대 구매가 추정 → 매물 검색 → 가격 내림차순 정렬 → 최적 매물 선정
-- **재검색**: 피드백 수신 시 이전 매물 대비 25% 저렴한 가격대로 재탐색
+- **역할**: 프로필 기반으로 예산 범위 내 매물 후보 리스트를 검색하여 TOP 5 반환
+- **방식**: Tool Calling으로 `search_properties` 도구 1회 호출
+- **로직**:
+  1. 보유 자금 + 예상 대출 한도(스트레스 DSR 반영) 기반 `max_price` 자동 산정
+  2. 네이버 부동산 API로 20개 매물의 실시간 매매가 조회
+  3. 예산 이하 매물 중 입지 점수 기준 상위 5개 선정
+- **Fallback**: LLM이 도구를 호출하지 않을 경우 직접 검색 수행
 
-### Agent 3: Finance Expert — 재무 및 규제 검증
+### Agent 3: Finance Expert — TOP 5 일괄 재무 검증
 
-- **역할**: RAG 기반 정책 검색 + Tool Calling 수치 계산으로 구매 가능성 종합 검증
-- **분석 절차**:
+- **역할**: RAG 기반 정책 검색 + Tool Calling 수치 계산으로 TOP 5 매물 각각의 구매 가능성을 종합 검증
+- **분석 절차** (TOP 5 매물 각각에 대해 반복):
   1. 취득세 계산 (`calculate_acquisition_tax`)
   2. 총 필요 자금 & 필요 대출금 산출 (`calculate_required_funds`)
   3. 대출 필요 여부 판단 (보유 자금만으로 구매 가능한지 확인)
   4. LTV/DSR 기반 최대 대출 한도 산출 (`calculate_loan_limit`)
   5. 필요 대출금 ≤ 최대 한도 여부로 구매 가능성 판정
-  6. 월 상환액 계산 (`calculate_monthly_repayment`)
-- **출력**: 마크다운 리포트 + `[VERDICT]PASS/FAIL[/VERDICT]` 태그
-
-### 조건부 라우팅 (재탐색 루프)
-
-```
-Finance Expert 판정 결과:
-  ├─ PASS (구매 가능)     → END
-  ├─ FAIL & 검색 < 3회   → Property Matcher (더 저렴한 매물 재검색)
-  └─ FAIL & 검색 ≥ 3회   → END (탐색 횟수 초과)
-```
+- **출력**: 마크다운 종합 리포트 (표 형태) + `[VERDICT]PASS/FAIL[/VERDICT]` 태그
+- **리포트 항목**: 순위, 매물명, 입지점수, 실시간 매매가, 취득세, 필요 대출금, 구매 가능 여부
 
 ---
 
@@ -119,14 +113,16 @@ Finance Expert 판정 결과:
 ```
 homefit/
 ├── app.py              # Streamlit UI (채팅 인터페이스, 사이드바)
-├── graph.py            # LangGraph StateGraph 정의 및 조건부 라우팅
+├── graph.py            # LangGraph StateGraph 정의 (단방향 리니어 플로우)
 ├── agents.py           # 3개 에이전트 LLM 호출 로직 (Profile, Matcher, Finance)
 ├── tools.py            # LangChain @tool 도구 (매물 검색, 세금/대출 계산)
-├── rag.py              # RAG 모듈 (정책 문서, FAISS 벡터스토어, Retriever)
+├── rag.py              # RAG 모듈 (정책 문서 12건, FAISS 벡터스토어, 리랭킹)
 ├── requirements.txt    # Python 의존성
 ├── .env                # API 키 설정 (Azure OpenAI, Google Gemini)
+├── .faiss_cache/       # FAISS 벡터스토어 캐시 (provider별 저장, 해시 기반 재색인)
 ├── .gitignore
-└── LICENSE             # MIT License
+├── LICENSE             # MIT License
+└── README.md
 ```
 
 ---
@@ -138,40 +134,60 @@ homefit/
 | 구성 요소 | 설명 |
 |-----------|------|
 | 메인 채팅 | `st.chat_message` 기반 대화형 인터페이스 |
-| 좌측 사이드바 | 모델 선택, 사용자 프로필, 검색 횟수, 추천 매물(1위), 후보 리스트(Top 5) |
+| 좌측 사이드바 | 모델 선택(Azure/Gemini), 사용자 프로필, 검색 횟수, 분석 대상 매물(1위), 후보 리스트(Top 5) |
 | 진행 상태 | `st.status` + `graph.stream()`으로 에이전트별 실시간 진행 표시 |
-| 결과 표시 | 재무 분석 리포트(마크다운) + 구매 가능 여부 배지 |
+| 결과 표시 | 재무 분석 리포트(마크다운 표) + 구매 가능 여부 배지 |
+
+### `graph.py` — LangGraph 워크플로
+
+단방향 리니어 플로우로 구성:
+
+```
+START → profile_agent → property_matcher → finance_expert → END
+```
 
 ### `agents.py` — 에이전트 모듈
 
 | 에이전트 | 함수 | LLM 기법 | 도구 |
 |---------|------|---------|------|
-| Profile Agent | `run_profile_agent()` | Structured Output (Pydantic) | 없음 |
+| Profile Agent | `run_profile_agent()` | Structured Output (Pydantic) | 없음 (Fallback: 정규식) |
 | Property Matcher | `run_property_matcher_agent()` | Tool Calling | `search_properties` |
-| Finance Expert | `run_finance_expert_agent()` | Tool Calling + RAG | 4개 계산 도구 |
+| Finance Expert | `run_finance_expert_agent()` | Tool Calling + RAG | 4개 계산 도구 (최대 20회 반복) |
 
 **공유 상태 스키마 (`GraphState`)**:
 - `user_query`, `user_profile`, `target_property`, `property_candidates`
 - `financial_report`, `feedback`, `is_valid`, `search_count`, `llm_provider`
 
+**LLM 팩토리 (`get_llm`)**:
+- `azure`: Azure OpenAI (GPT-4o-mini)
+- `gemini`: Google Gemini (기본 gemini-2.0-flash)
+
 ### `tools.py` — Tool 정의
 
 | 도구 | 용도 |
 |------|------|
-| `search_properties` | 가격·지역·유형 조건으로 매물 검색 (30건 더미 데이터) |
-| `calculate_acquisition_tax` | 취득세 계산 (생애 최초/출산 가구 감면 반영) |
-| `calculate_loan_limit` | LTV + 스트레스 DSR 3단계 기반 최대 대출 한도 산출 |
+| `search_properties` | 네이버 부동산 API로 20개 매물의 실시간 매매가 조회 후, 예산 이하 매물을 입지 점수 기준 Top 5 반환 |
+| `calculate_acquisition_tax` | 취득세 계산 (생애 최초 200만원 / 출산·양육 가구 500만원 감면 반영) |
+| `calculate_loan_limit` | 보유 자금 우선 사용 → 부족분 대출: LTV + 스트레스 DSR 3단계 기반 최대 대출 한도 산출 |
 | `calculate_required_funds` | 총 필요 자금 & 필요 대출금 계산 (LLM 산수 환각 방지) |
 | `calculate_monthly_repayment` | 원리금균등상환 방식 월 상환액 계산 |
+
+**더미 매물 데이터**: 서울 성북구·강북구·노원구 소재 아파트 20건 (각 매물에 `hscp_no` 포함)
+
+**실시간 가격 조회**: `_fetch_realtime_price(hscp_no)` → 네이버 부동산 API에서 단지별 최신 매매가 업데이트
 
 ### `rag.py` — RAG 모듈
 
 | 구성 요소 | 설명 |
 |-----------|------|
-| 정책 문서 (6건) | LTV 규제, 스트레스 DSR, 취득세, 대출 금리, 추가 비용, 보유 자금 우선 사용 원칙 |
+| 정책 문서 (12건) | LTV 규제(3건), 스트레스 DSR(2건), 취득세(3건), 대출 금리(2건), 추가 비용(1건), 재무분석 가이드(1건) |
+| 메타데이터 | `chunk_id`, `law_name`, `effective_date`, `buyer_type`, `category`, `topic` |
 | 임베딩 | Azure OpenAI `text-embedding-3-small` 또는 Google `gemini-embedding-001` |
-| 벡터스토어 | FAISS (provider별 싱글턴) |
-| Retriever | 유사도 기반 Top-k 검색 (기본 k=3~4) |
+| 벡터스토어 | FAISS (provider별 싱글턴, `.faiss_cache/`에 영속화) |
+| 재색인 | 문서 해시(`SHA-256`) 기반 — 문서 내용 변경 시 자동 재생성 |
+| topic 커버리지 | LTV/DSR/취득세 문서가 모두 포함되지 않으면 k를 늘려 재검색 |
+| 리랭킹 | 쿼리 키워드 + 도메인 키워드 매칭도 기반 결과 재정렬 |
+| Retriever | 유사도 기반 Top-k 검색 (기본 k=3~4) + `buyer_type` 필터링 |
 
 ---
 
@@ -235,7 +251,7 @@ AOAI_DEPLOY_EMBED_3_SMALL=text-embedding-3-small
 
 # Google Gemini (선택)
 GOOGLE_API_KEY=your-google-api-key
-GOOGLE_MODEL_NAME=gemini-3.5-flash
+GOOGLE_MODEL_NAME=gemini-2.0-flash
 GOOGLE_EMBED_MODEL=gemini-embedding-001
 ```
 
@@ -260,19 +276,16 @@ streamlit run app.py
 ### 처리 흐름
 
 1. **Profile Agent**: 보유 자금 30,000만원, 연소득 6,000만원, 가구원 3명, 서울, 아파트 추출
-2. **Property Matcher**: 서울 소재 예산 범위 내 아파트 검색 → 가격 내림차순 정렬 → 최적 매물 선정
-3. **Finance Expert**: 취득세 → 필요 대출금 → LTV/DSR 검증 → 월 상환액 → 구매 가능성 판정
-4. **결과**: 마크다운 리포트 (매물 정보, 세금, 대출 분석, Top 5 추천 매물 포함)
+2. **Property Matcher**: 네이버 부동산 API로 실시간 매매가 조회 → 예산 내 입지 점수 기준 TOP 5 선정
+3. **Finance Expert**: TOP 5 매물 각각에 대해 취득세 → 필요 대출금 → LTV/DSR 검증 → 종합 리포트 출력
+4. **결과**: 마크다운 리포트 (TOP 5 비교표 + 구매 가능 여부 판정)
 
 ### 리포트 주요 항목
 
-- 매물 정보 요약
-- 취득세 계산 결과
-- 총 필요 자금 & 필요 대출금 분석
-- 대출 한도 분석 (LTV/DSR, 스트레스 DSR 반영)
-- 월 상환액 예상
-- 최종 구매 가능 여부 판정
-- 보유 자금 + 대출 활용 구매 가능 매물 Top 5
+- 사용자 재무 현황 요약
+- TOP 5 매물 종합 분석 결과표 (순위, 매물명, 입지점수, 실시간 매매가, 취득세, 필요 대출금, 구매 가능 여부)
+- 구매 가능 매물에 대한 상세 설명
+- 종합 의견 및 추천
 
 ---
 
@@ -281,9 +294,10 @@ streamlit run app.py
 | 분류 | 기술 |
 |------|------|
 | **프레임워크** | LangChain, LangGraph |
-| **LLM** | Azure OpenAI (GPT-4o-mini), Google Gemini (3.5 Flash) |
+| **LLM** | Azure OpenAI (GPT-4o-mini), Google Gemini (2.0 Flash) |
 | **임베딩** | Azure `text-embedding-3-small`, Google `gemini-embedding-001` |
-| **벡터 DB** | FAISS (CPU) |
+| **벡터 DB** | FAISS (CPU, 로컬 캐시 영속화) |
+| **실시간 데이터** | 네이버 부동산 API (매물 실시간 매매가 조회) |
 | **UI** | Streamlit |
 | **데이터 검증** | Pydantic v2 |
 | **환경 관리** | python-dotenv |
