@@ -27,7 +27,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2007,
         "score": 85,
-        "hscp_no": "10532",
+        "hscp_no": "18212",
         "description": "길음뉴타운 내 위치, 977세대, 대중교통 이용 편리",
     },
     {
@@ -40,7 +40,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2010,
         "score": 76,
-        "hscp_no": "10847",
+        "hscp_no": "26160",
         "description": "길음뉴타운 대단지 (1,012세대), 학군 우수",
     },
     {
@@ -53,7 +53,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2003,
         "score": 73,
-        "hscp_no": "10215",
+        "hscp_no": "3422",
         "description": "길음뉴타운 진입부, 1,125세대 대단지",
     },
     {
@@ -66,7 +66,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2010,
         "score": 70,
-        "hscp_no": "10846",
+        "hscp_no": "26159",
         "description": "1,497세대 대단지, 쾌적한 주거환경",
     },
     {
@@ -79,7 +79,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2014,
         "score": 69,
-        "hscp_no": "11493",
+        "hscp_no": "108463",
         "description": "돈암동 위치, 490세대, 비교적 신축 컨디션",
     },
     {
@@ -92,7 +92,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2003,
         "score": 66,
-        "hscp_no": "10198",
+        "hscp_no": "3423",
         "description": "돈암동 540세대, 가성비 우수",
     },
     {
@@ -105,7 +105,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2019,
         "score": 80,
-        "hscp_no": "12371",
+        "hscp_no": "111330",
         "description": "미아사거리역 역세권, 2,352세대 랜드마크 신축",
     },
     {
@@ -118,7 +118,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2022,
         "score": 80,
-        "hscp_no": "12805",
+        "hscp_no": "126062",
         "description": "미아사거리역 인접, 2,029세대 최신축 프리미엄",
     },
     {
@@ -131,7 +131,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2010,
         "score": 68,
-        "hscp_no": "10961",
+        "hscp_no": "26885",
         "description": "미아사거리 인프라 공유, 376세대 알짜 단지",
     },
     {
@@ -144,7 +144,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2006,
         "score": 68,
-        "hscp_no": "10437",
+        "hscp_no": "17516",
         "description": "480세대, 교통 및 상권 이용 편리",
     },
     {
@@ -157,7 +157,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2004,
         "score": 60,
-        "hscp_no": "10302",
+        "hscp_no": "3098",
         "description": "솔샘역 초역세권, 3,830세대 초대형 단지, 북한산 숲세권",
     },
     {
@@ -170,7 +170,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2011,
         "score": 62,
-        "hscp_no": "11058",
+        "hscp_no": "27413",
         "description": "솔샘역 인접, 1,370세대 대단지",
     },
     {
@@ -183,7 +183,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2009,
         "score": 67,
-        "hscp_no": "10743",
+        "hscp_no": "25948",
         "description": "석관동 580세대, 조용한 주거 환경",
     },
     {
@@ -196,7 +196,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2020,
         "score": 79,
-        "hscp_no": "12590",
+        "hscp_no": "122863",
         "description": "장위뉴타운 내 신축, 1,711세대, 북서울꿈의숲 인접",
     },
     {
@@ -209,7 +209,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2025,
         "score": 77,
-        "hscp_no": "13104",
+        "hscp_no": "160539",
         "description": "장위뉴타운 대장주 예정, 2,840세대 최신축 프리미엄",
     },
     {
@@ -222,7 +222,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2003,
         "score": 60,
-        "hscp_no": "10176",
+        "hscp_no": "3425",
         "description": "장위동 1,253세대, 실속형 대단지",
     },
     {
@@ -235,7 +235,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2016,
         "score": 71,
-        "hscp_no": "11829",
+        "hscp_no": "110476",
         "description": "중계동 학원가 접근성 우수, 457세대 신축급",
     },
     {
@@ -248,7 +248,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 1998,
         "score": 59,
-        "hscp_no": "10052",
+        "hscp_no": "582",
         "description": "돈암동 4,515세대 초대형 매머드급 단지",
     },
     {
@@ -261,7 +261,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2017,
         "score": 74,
-        "hscp_no": "12014",
+        "hscp_no": "109051",
         "description": "보문역 역세권, 1,186세대 대단지, 직주근접 우수, 수영장 아파트",
     },
     {
@@ -274,7 +274,7 @@ DUMMY_PROPERTIES = [
         "rooms": 3,
         "year_built": 2010,
         "score": 70,
-        "hscp_no": "10855",
+        "hscp_no": "17700",
         "description": "월곡동 위치, 대중교통 접근성 양호",
     },
 ]
