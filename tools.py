@@ -12,6 +12,8 @@ Property Matcher Agent와 Finance Expert Agent가 Function Calling으로 호출�
 """
 
 import json
+import re
+import time
 import requests
 from langchain_core.tools import tool
 
@@ -291,29 +293,118 @@ def _is_regulated(area: str) -> bool:
     return any(r in area for r in REGULATED_AREAS)
 
 
-NAVER_LAND_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://new.land.naver.com/",
-}
+_naver_session: requests.Session | None = None
+_naver_session_ts: float = 0
+_SESSION_TTL = 3600  # 토큰 유효시간: 약 3시간, 1시간마다 갱신
+
+
+def _get_naver_session() -> requests.Session:
+    """네이버 부동산 세션을 생성/재사용합니다.
+    메인 페이지 방문으로 쿠키 + JWT 토큰을 자동 획득합니다.
+    """
+    global _naver_session, _naver_session_ts
+
+    if _naver_session and (time.time() - _naver_session_ts) < _SESSION_TTL:
+        return _naver_session
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    })
+
+    try:
+        resp = session.get("https://new.land.naver.com/", timeout=10)
+        if resp.status_code == 200:
+            jwt_matches = re.findall(
+                r"(eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)",
+                resp.text,
+            )
+            session.headers.update({
+                "Accept": "application/json, text/plain, */*",
+                "Referer": "https://new.land.naver.com/",
+                "sec-ch-ua": '"Chromium";v="131"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
+            })
+            if jwt_matches:
+                session.headers["authorization"] = f"Bearer {jwt_matches[0]}"
+    except Exception:
+        pass
+
+    _naver_session = session
+    _naver_session_ts = time.time()
+    return session
+
+
+def _naver_api_get(session: requests.Session, url: str, max_retries: int = 3):
+    """네이버 API GET 요청 + 429 지수 백오프 재시도."""
+    for attempt in range(max_retries):
+        try:
+            resp = session.get(url, timeout=5)
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 429 and attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return None
+        except Exception:
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return None
+    return None
 
 
 def _fetch_realtime_price(hscp_no: str) -> int | None:
-    """네이버 부동산 API에서 단지의 최신 매매가(만원)를 조회합니다."""
-    url = f"https://new.land.naver.com/api/complexes/{hscp_no}"
-    try:
-        resp = requests.get(url, headers=NAVER_LAND_HEADERS, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            deal_price = data.get("complexDetail", {}).get("dealPrice")
-            if deal_price:
-                price_str = str(deal_price).replace(",", "").strip()
-                return int(price_str)
-    except Exception:
-        pass
+    """네이버 부동산 API에서 단지 내 최소 평형의 최신 매매 실거래가(만원)를 조회합니다.
+
+    조회 절차:
+      1) overview API → 평형(pyeongs) 목록 획득
+      2) 전용면적이 가장 작은 평형(areaNo) 선택
+      3) prices/real API → 해당 평형의 최신 매매 실거래가 반환
+      4) 실거래 이력이 없으면 overview의 대표 실거래가로 폴백
+    """
+    session = _get_naver_session()
+    base = "https://new.land.naver.com/api/complexes"
+
+    overview = _naver_api_get(session, f"{base}/overview/{hscp_no}")
+    if not overview:
+        return None
+
+    pyeongs = overview.get("pyeongs", [])
+    if pyeongs:
+        smallest = min(pyeongs, key=lambda p: float(p.get("exclusiveArea", 999)))
+        area_no = smallest.get("pyeongNo")
+        if area_no is not None:
+            time.sleep(0.3)
+            price_data = _naver_api_get(
+                session,
+                f"{base}/{hscp_no}/prices/real?areaNo={area_no}&type=table",
+            )
+            if price_data:
+                for month in price_data.get("realPriceOnMonthList", []):
+                    for tx in month.get("realPriceList", []):
+                        if tx.get("tradeType") == "A1" and tx.get("dealPrice"):
+                            return int(str(tx["dealPrice"]).replace(",", "").strip())
+
+    real_price = overview.get("realPrice", {})
+    deal_price = real_price.get("dealPrice")
+    if deal_price:
+        return int(str(deal_price).replace(",", "").strip())
+
+    min_price = overview.get("minPrice")
+    if min_price:
+        return int(str(min_price).replace(",", "").strip())
+
     return None
 
 
@@ -333,9 +424,11 @@ def search_properties(max_price: int) -> str:
     import copy
     properties = copy.deepcopy(DUMMY_PROPERTIES)
 
-    for prop in properties:
+    for i, prop in enumerate(properties):
         hscp_no = prop.get("hscp_no")
         if hscp_no:
+            if i > 0:
+                time.sleep(0.5)
             realtime_price = _fetch_realtime_price(hscp_no)
             if realtime_price is not None:
                 prop["price"] = realtime_price
