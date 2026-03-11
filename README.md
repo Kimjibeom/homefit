@@ -28,7 +28,7 @@
 | 기능 | 설명 |
 |------|------|
 | **자연어 프로파일링** | 사용자의 자유 형식 질문에서 예산, 소득, 가구원 수, 선호 지역 등을 자동 추출 |
-| **실시간 매물 검색** | 네이버 부동산 API로 실시간 매매가를 조회하고, 입지 점수 기준 Top 5 매물을 추천 |
+| **실시간 매물 검색** | 네이버 부동산 API(세션 인증 + JWT 토큰)로 단지 내 최소 평형의 실거래가를 조회하고, 입지 점수 기준 Top 5 매물을 추천 |
 | **TOP 5 일괄 재무 분석** | 취득세, 대출 한도(LTV/DSR), 월 상환액을 TOP 5 매물 각각에 대해 도구 기반으로 정밀 계산 |
 | **RAG 기반 정책 검증** | FAISS 벡터 DB에서 관련 부동산 정책 문서를 검색하여 근거 기반 분석 (topic 커버리지 + 키워드 리랭킹) |
 | **듀얼 LLM 지원** | Azure OpenAI(GPT-4o-mini)와 Google Gemini 중 선택 가능 |
@@ -65,11 +65,12 @@
    │agents.py │      │  tools.py    │     │   rag.py     │
    │ 에이전트  │      │  Tool 정의   │     │  RAG 모듈    │
    │ LLM 호출  │─────▶│ - 매물 검색  │     │ - 정책 문서  │
-   │ 로직      │      │   (실시간)   │     │   (12건)     │
-   └──────────┘      │ - 취득세     │     │ - FAISS DB   │
-                     │ - 대출 한도  │     │ - 캐시 영속화│
-                     │ - 필요 자금  │     │ - 리랭킹     │
-                     │ - 월 상환액  │     └──────────────┘
+   │ 로직      │      │  (평형별    │     │   (12건)     │
+   └──────────┘      │   실거래가) │     │ - FAISS DB   │
+                     │ - 취득세     │     │ - 캐시 영속화│
+                     │ - 대출 한도  │     │ - 리랭킹     │
+                     │ - 필요 자금  │     └──────────────┘
+                     │ - 월 상환액  │
                      └──────────────┘
 ```
 
@@ -90,7 +91,7 @@
 - **방식**: Tool Calling으로 `search_properties` 도구 1회 호출
 - **로직**:
   1. 보유 자금 + 예상 대출 한도(스트레스 DSR 반영) 기반 `max_price` 자동 산정
-  2. 네이버 부동산 API로 20개 매물의 실시간 매매가 조회
+  2. 네이버 부동산 API로 20개 매물 각각의 최소 평형 실거래가 조회 (overview → prices/real 2단계)
   3. 예산 이하 매물 중 입지 점수 기준 상위 5개 선정
 - **Fallback**: LLM이 도구를 호출하지 않을 경우 직접 검색 수행
 
@@ -104,7 +105,7 @@
   4. LTV/DSR 기반 최대 대출 한도 산출 (`calculate_loan_limit`)
   5. 필요 대출금 ≤ 최대 한도 여부로 구매 가능성 판정
 - **출력**: 마크다운 종합 리포트 (표 형태) + `[VERDICT]PASS/FAIL[/VERDICT]` 태그
-- **리포트 항목**: 순위, 매물명, 입지점수, 실시간 매매가, 취득세, 필요 대출금, 구매 가능 여부
+- **리포트 항목**: 순위, 매물명, 입지점수, 최소평형 실거래가, 취득세, 필요 대출금, 구매 가능 여부
 
 ---
 
@@ -166,7 +167,7 @@ START → profile_agent → property_matcher → finance_expert → END
 
 | 도구 | 용도 |
 |------|------|
-| `search_properties` | 네이버 부동산 API로 20개 매물의 실시간 매매가 조회 후, 예산 이하 매물을 입지 점수 기준 Top 5 반환 |
+| `search_properties` | 네이버 부동산 API로 20개 매물의 최소 평형 실거래가 조회 후, 예산 이하 매물을 입지 점수 기준 Top 5 반환 |
 | `calculate_acquisition_tax` | 취득세 계산 (생애 최초 200만원 / 출산·양육 가구 500만원 감면 반영) |
 | `calculate_loan_limit` | 보유 자금 우선 사용 → 부족분 대출: LTV + 스트레스 DSR 3단계 기반 최대 대출 한도 산출 |
 | `calculate_required_funds` | 총 필요 자금 & 필요 대출금 계산 (LLM 산수 환각 방지) |
@@ -174,7 +175,19 @@ START → profile_agent → property_matcher → finance_expert → END
 
 **더미 매물 데이터**: 서울 성북구·강북구·노원구 소재 아파트 20건 (각 매물에 `hscp_no` 포함)
 
-**실시간 가격 조회**: `_fetch_realtime_price(hscp_no)` → 네이버 부동산 API에서 단지별 최신 매매가 업데이트
+**실시간 가격 조회** (세션 인증 기반):
+
+| 내부 함수 | 역할 |
+|-----------|------|
+| `_get_naver_session()` | 네이버 부동산 메인 페이지 방문 → 쿠키 + JWT 토큰 자동 획득 (1시간 TTL 캐싱) |
+| `_naver_api_get()` | API GET 요청 + HTTP 429 지수 백오프 재시도 (최대 3회) |
+| `_fetch_realtime_price(hscp_no)` | 단지 내 최소 평형의 최신 매매 실거래가 조회 |
+
+`_fetch_realtime_price` 조회 절차:
+1. **overview API** (`/api/complexes/overview/{hscp_no}`) → 평형(`pyeongs`) 목록 획득
+2. 전용면적(`exclusiveArea`)이 가장 작은 평형의 `areaNo` 선택
+3. **prices/real API** (`/api/complexes/{hscp_no}/prices/real?areaNo={areaNo}`) → 해당 평형의 최신 매매 실거래가 반환
+4. **폴백**: 평형별 실거래 이력이 없으면 overview 대표 실거래가 → `minPrice` 순으로 폴백
 
 ### `rag.py` — RAG 모듈
 
@@ -276,14 +289,14 @@ streamlit run app.py
 ### 처리 흐름
 
 1. **Profile Agent**: 보유 자금 30,000만원, 연소득 6,000만원, 가구원 3명, 서울, 아파트 추출
-2. **Property Matcher**: 네이버 부동산 API로 실시간 매매가 조회 → 예산 내 입지 점수 기준 TOP 5 선정
+2. **Property Matcher**: 네이버 부동산 API로 최소 평형 실거래가 조회 → 예산 내 입지 점수 기준 TOP 5 선정
 3. **Finance Expert**: TOP 5 매물 각각에 대해 취득세 → 필요 대출금 → LTV/DSR 검증 → 종합 리포트 출력
 4. **결과**: 마크다운 리포트 (TOP 5 비교표 + 구매 가능 여부 판정)
 
 ### 리포트 주요 항목
 
 - 사용자 재무 현황 요약
-- TOP 5 매물 종합 분석 결과표 (순위, 매물명, 입지점수, 실시간 매매가, 취득세, 필요 대출금, 구매 가능 여부)
+- TOP 5 매물 종합 분석 결과표 (순위, 매물명, 입지점수, 최소평형 실거래가, 취득세, 필요 대출금, 구매 가능 여부)
 - 구매 가능 매물에 대한 상세 설명
 - 종합 의견 및 추천
 
@@ -297,7 +310,7 @@ streamlit run app.py
 | **LLM** | Azure OpenAI (GPT-4o-mini), Google Gemini (2.0 Flash) |
 | **임베딩** | Azure `text-embedding-3-small`, Google `gemini-embedding-001` |
 | **벡터 DB** | FAISS (CPU, 로컬 캐시 영속화) |
-| **실시간 데이터** | 네이버 부동산 API (매물 실시간 매매가 조회) |
+| **실시간 데이터** | 네이버 부동산 API (세션 인증 + JWT, 평형별 실거래가 조회) |
 | **UI** | Streamlit |
 | **데이터 검증** | Pydantic v2 |
 | **환경 관리** | python-dotenv |
